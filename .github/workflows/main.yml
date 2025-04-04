@@ -1,0 +1,75 @@
+name: Deploy to Kubernetes
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Image Version
+        id: versioning
+        run: |
+          VERSION=$(TZ=Asia/Kolkata date +'%Y%m%d%H%M%S') # Generates timestamp-based version
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v1
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/dev_repo:${{ env.VERSION }}
+            ${{ secrets.DOCKER_USERNAME }}/dev_repo:latest
+
+      - name: Update Kubernetes Deployment YAML
+        run: |
+          sed -i "s|image: .*|image: ${{ secrets.DOCKER_USERNAME }}/dev_repo:${{ env.VERSION }}|g" deployment.yaml
+
+      - name: Apply Kubernetes Manifests
+        run: |
+          kubectl apply -f deployment.yaml
+          kubectl apply -f service.yaml
+          kubectl apply -f hpa.yaml
+
+      # -------------------------------------------
+      # ✅ Deploy Prometheus & Grafana in Kubernetes
+      # -------------------------------------------
+      - name: Deploy Prometheus & Grafana
+        run: |
+          kubectl apply -f prometheus.yml
+          kubectl apply -f k8s-prometheus-grafana.yaml
+
+      # -------------------------------------------
+      # ✅ Deploy to EC2 Instance
+      # -------------------------------------------
+      - name: Deploy to EC2 instance
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_PRIVATE_KEY }}
+          script: |
+            # Ensure old container is stopped
+            docker stop aita_container || true
+            docker rm aita_container || true
+            
+            # Pull the latest versioned image
+            docker pull ${{ secrets.DOCKER_USERNAME }}/dev_repo:${{ env.VERSION }}
+
+            # Run the container with the new version
+            docker run -d --name aita_container -p 80:80 ${{ secrets.DOCKER_USERNAME }}/dev_repo:${{ env.VERSION }}
+
+            # Verify running container
+            docker ps
