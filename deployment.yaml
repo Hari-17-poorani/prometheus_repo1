@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+  labels:
+    app: my-app
+spec:
+  replicas: 2  # Initial number of replicas
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      restartPolicy: Always
+      imagePullSecrets:  # Secret to pull private images from Docker Hub
+        - name: dockerhub-secret
+      containers:
+        - name: my-app
+          image: spiadmindocker/spi_directory:20250331125942  # Ensure this is correct
+          imagePullPolicy: Always  # Ensures Kubernetes pulls the latest version
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "500m"
+              memory: "1Gi"
+          readinessProbe:  # Ensures pod is ready before sending traffic
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:  # Ensures unhealthy pods are restarted
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 20
